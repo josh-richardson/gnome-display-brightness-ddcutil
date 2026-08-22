@@ -83,7 +83,7 @@
         <child>
           <object class="AdwSpinRow" id="idle_dimming_delay_row">
             <property name="title" translatable="yes">Dim After</property>
-            <property name="subtitle" translatable="yes">Seconds of inactivity</property>
+            <property name="subtitle" translatable="yes">Minutes of inactivity</property>
             <property name="numeric">True</property>
             <property name="adjustment">idle_dimming_delay_adjustment</property>
             <property name="sensitive" bind-source="idle_dimming_enabled_row" bind-property="active" bind-flags="sync-create" />
@@ -207,9 +207,9 @@
     <property name="step-increment">4</property>
   </object>
   <object class="GtkAdjustment" id="idle_dimming_delay_adjustment">
-    <property name="lower">10</property>
-    <property name="upper">7200</property>
-    <property name="step-increment">10</property>
+    <property name="lower">1</property>
+    <property name="upper">120</property>
+    <property name="step-increment">1</property>
   </object>
   <object class="GtkAdjustment" id="idle_dimming_brightness_adjustment">
     <property name="lower">1</property>

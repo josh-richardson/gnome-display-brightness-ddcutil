@@ -89,7 +89,7 @@ const PrefsWidget = GObject.registerClass({
             'active',
             Gio.SettingsBindFlags.DEFAULT
         );
-        this._idle_dimming_delay_row.value = this.settings.get_int('idle-dimming-delay-seconds');
+        this._idle_dimming_delay_row.value = this.settings.get_int('idle-dimming-delay-minutes');
         this._idle_dimming_brightness_row.value = this.settings.get_double('idle-dimming-brightness');
 
         this.settings.bind(
@@ -282,7 +282,7 @@ const PrefsWidget = GObject.registerClass({
     }
 
     onIdleDimmingDelayChanged() {
-        this.settings.set_int('idle-dimming-delay-seconds', this._idle_dimming_delay_row.value);
+        this.settings.set_int('idle-dimming-delay-minutes', this._idle_dimming_delay_row.value);
     }
 
     onIdleDimmingBrightnessChanged() {

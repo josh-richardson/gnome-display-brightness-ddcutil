@@ -255,7 +255,7 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
             !this.settings.get_boolean('idle-dimming-enabled'))
             return;
 
-        const delayMs = this.settings.get_int('idle-dimming-delay-seconds') * 1000;
+        const delayMs = this.settings.get_int('idle-dimming-delay-minutes') * 60 * 1000;
         brightnessLog(this.settings, `Polling for ${delayMs} ms of idle time`);
         this._idlePollSourceId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
             const idleTime = this._idleMonitor.get_idletime();
@@ -806,7 +806,7 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
             'decrease-brightness-shortcut': this.settings.get_strv('decrease-brightness-shortcut'),
             'increase-brightness-shortcut': this.settings.get_strv('increase-brightness-shortcut'),
             'idle-dimming-enabled': this.settings.get_boolean('idle-dimming-enabled'),
-            'idle-dimming-delay-seconds': this.settings.get_int('idle-dimming-delay-seconds'),
+            'idle-dimming-delay-minutes': this.settings.get_int('idle-dimming-delay-minutes'),
             'idle-dimming-brightness': this.settings.get_double('idle-dimming-brightness'),
         };
         return out;
@@ -874,7 +874,7 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
             idle_dimming_enabled: this.settings.connect('changed::idle-dimming-enabled', () => {
                 this.configureIdleDimming();
             }),
-            idle_dimming_delay: this.settings.connect('changed::idle-dimming-delay-seconds', () => {
+            idle_dimming_delay: this.settings.connect('changed::idle-dimming-delay-minutes', () => {
                 this.configureIdleDimming();
             }),
         };

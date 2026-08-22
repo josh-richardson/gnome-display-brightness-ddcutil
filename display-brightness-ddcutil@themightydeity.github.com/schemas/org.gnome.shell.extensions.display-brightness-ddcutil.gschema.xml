@@ -34,10 +34,10 @@
       <default>false</default>
       <summary>Dim external displays after a period of user inactivity</summary>
     </key>
-    <key type="i" name="idle-dimming-delay-seconds">
-      <range min="10" max="7200" />
-      <default>300</default>
-      <summary>Seconds of inactivity before external displays are dimmed</summary>
+    <key type="i" name="idle-dimming-delay-minutes">
+      <range min="1" max="120" />
+      <default>5</default>
+      <summary>Minutes of inactivity before external displays are dimmed</summary>
     </key>
     <key type="d" name="idle-dimming-brightness">
       <range min="1" max="100" />
