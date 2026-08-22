@@ -87,6 +87,11 @@ const BrightnessProxy = Gio.DBusProxy.makeProxyWrapper(BrightnessInterface);
 export default class DDCUtilBrightnessControlExtension extends Extension {
     enable() {
         this.settings = this.getSettings();
+        this._idleMonitor = null;
+        this._idleWatchId = 0;
+        this._userActiveWatchId = 0;
+        this._idleDimmed = false;
+        this._idleBrightnessByBus = new Map();
         this.enableBrightnessControl();
     }
 
@@ -113,6 +118,7 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
             this.connectMonitorChangeSignals();
 
             this.addKeyboardShortcuts();
+            this.configureIdleDimming();
 
             if (this.settings.get_int('button-location') === 0) {
                 this.addTextItemToPanel(_('Initializing'));
@@ -127,6 +133,9 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
         /* disconnect all signals */
         this.disconnectSettingsSignals();
         this.disconnectMonitorSignals();
+
+        /* Never leave a monitor dimmed when the extension is disabled/reloaded. */
+        this.disableIdleDimming(true);
 
         /* remove shortcuts */
         this.removeKeyboardShortcuts();
@@ -189,7 +198,7 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
         kickoffNext("on start");
     }
 
-    setBrightness(display, newValue) {
+    setBrightness(display, newValue, bypassQueue = false) {
         if (display.bus === 'internal') {
             this.setInternalBrightness(newValue);
             return;
@@ -210,7 +219,123 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
         brightnessLog(this.settings, `display ${display.name}, current: ${display.current} => ${newValue / 100}, new brightness: ${newBrightness}, new value: ${newValue}`);
         display.current = newValue / 100;
 
-        this.ddcWriteCollector(display.bus, writer);
+        if (bypassQueue)
+            writer(null);
+        else
+            this.ddcWriteCollector(display.bus, writer);
+    }
+
+    removeIdleWatches() {
+        if (this._idleMonitor === null)
+            return;
+
+        if (this._idleWatchId !== 0) {
+            this._idleMonitor.remove_watch(this._idleWatchId);
+            this._idleWatchId = 0;
+        }
+        if (this._userActiveWatchId !== 0) {
+            this._idleMonitor.remove_watch(this._userActiveWatchId);
+            this._userActiveWatchId = 0;
+        }
+    }
+
+    configureIdleDimming() {
+        this.removeIdleWatches();
+
+        if (!this.settings.get_boolean('idle-dimming-enabled')) {
+            brightnessLog(this.settings, 'Idle dimming disabled');
+            this.restoreIdleBrightness();
+            return;
+        }
+
+        try {
+            this._idleMonitor = global.backend.get_core_idle_monitor();
+            brightnessLog(this.settings, 'Idle dimming enabled');
+            this.scheduleIdleWatch();
+        } catch (error) {
+            brightnessLog(this.settings, `Unable to initialize idle dimming: ${error}`);
+            this._idleMonitor = null;
+        }
+    }
+
+    scheduleIdleWatch() {
+        if (this._idleMonitor === null || this._idleDimmed ||
+            !this.settings.get_boolean('idle-dimming-enabled'))
+            return;
+
+        const delayMs = this.settings.get_int('idle-dimming-delay-seconds') * 1000;
+        brightnessLog(this.settings, `Scheduling idle dimming in ${delayMs} ms`);
+        this._idleWatchId = this._idleMonitor.add_idle_watch(delayMs, () => {
+            const watchId = this._idleWatchId;
+            this._idleWatchId = 0;
+            if (watchId !== 0)
+                this._idleMonitor.remove_watch(watchId);
+
+            this.dimDisplaysForIdle();
+            this._userActiveWatchId = this._idleMonitor.add_user_active_watch(() => {
+                this._userActiveWatchId = 0;
+                this.restoreIdleBrightness();
+                this.scheduleIdleWatch();
+            });
+        });
+    }
+
+    changeBrightnessAutomatically(display, brightness, bypassQueue = false) {
+        if (display.slider && !bypassQueue) {
+            display.slider.setHideOSD();
+            display.slider.changeValue(brightness);
+            display.slider.resetOSD();
+        } else {
+            this.setBrightness(display, brightness, bypassQueue);
+        }
+    }
+
+    dimDisplaysForIdle() {
+        if (this._idleDimmed || displays === null)
+            return;
+
+        const externalDisplays = displays.filter(display => display.bus !== 'internal');
+        this._idleBrightnessByBus.clear();
+        this._idleDimmed = true;
+
+        /* Late DDC discovery will dim displays in the discovery callback. */
+        if (externalDisplays.length === 0) {
+            brightnessLog(this.settings, 'Idle detected; waiting for display discovery');
+            return;
+        }
+
+        for (const display of externalDisplays)
+            this._idleBrightnessByBus.set(display.bus, display.current * 100);
+
+        const dimBrightness = this.settings.get_double('idle-dimming-brightness');
+        brightnessLog(this.settings, `Idle detected; dimming displays to ${dimBrightness}%`);
+        for (const display of externalDisplays)
+            this.changeBrightnessAutomatically(display, dimBrightness);
+    }
+
+    restoreIdleBrightness(bypassQueue = false) {
+        if (!this._idleDimmed || displays === null)
+            return;
+
+        brightnessLog(this.settings, 'User active; restoring display brightness');
+        for (const display of displays) {
+            if (!this._idleBrightnessByBus.has(display.bus))
+                continue;
+            this.changeBrightnessAutomatically(
+                display,
+                this._idleBrightnessByBus.get(display.bus),
+                bypassQueue
+            );
+        }
+
+        this._idleBrightnessByBus.clear();
+        this._idleDimmed = false;
+    }
+
+    disableIdleDimming(restoreImmediately = false) {
+        this.removeIdleWatches();
+        this.restoreIdleBrightness(restoreImmediately);
+        this._idleMonitor = null;
     }
 
     setInternalBrightness(newValue) {
@@ -545,6 +670,15 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
         brightnessLog(this.settings, `added display to list ${JSON.stringify(display)}`);
         displays.push(display);
 
+        /* Discovery can finish after the idle watch has already fired. */
+        if (this._idleDimmed) {
+            this._idleBrightnessByBus.set(display.bus, display.current * 100);
+            this.changeBrightnessAutomatically(
+                display,
+                this.settings.get_double('idle-dimming-brightness')
+            );
+        }
+
         /* cheap way of reloading all display slider in the panel */
         this.reloadMenuWidgets();
     }
@@ -683,6 +817,9 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
             'ddcutil-binary-path': this.settings.get_string('ddcutil-binary-path'),
             'decrease-brightness-shortcut': this.settings.get_strv('decrease-brightness-shortcut'),
             'increase-brightness-shortcut': this.settings.get_strv('increase-brightness-shortcut'),
+            'idle-dimming-enabled': this.settings.get_boolean('idle-dimming-enabled'),
+            'idle-dimming-delay-seconds': this.settings.get_int('idle-dimming-delay-seconds'),
+            'idle-dimming-brightness': this.settings.get_double('idle-dimming-brightness'),
         };
         return out;
     }
@@ -745,6 +882,12 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
             }),
             verbose_debugging: this.settings.connect('changed::verbose-debugging', () => {
                 this.reloadExtension();
+            }),
+            idle_dimming_enabled: this.settings.connect('changed::idle-dimming-enabled', () => {
+                this.configureIdleDimming();
+            }),
+            idle_dimming_delay: this.settings.connect('changed::idle-dimming-delay-seconds', () => {
+                this.configureIdleDimming();
             }),
         };
     }
