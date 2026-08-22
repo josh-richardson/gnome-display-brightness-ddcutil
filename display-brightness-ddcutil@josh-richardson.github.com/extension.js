@@ -88,8 +88,7 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
     enable() {
         this.settings = this.getSettings();
         this._idleMonitor = null;
-        this._idleWatchId = 0;
-        this._userActiveWatchId = 0;
+        this._idlePollSourceId = 0;
         this._idleDimmed = false;
         this._idleBrightnessByBus = new Map();
         this.enableBrightnessControl();
@@ -226,16 +225,9 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
     }
 
     removeIdleWatches() {
-        if (this._idleMonitor === null)
-            return;
-
-        if (this._idleWatchId !== 0) {
-            this._idleMonitor.remove_watch(this._idleWatchId);
-            this._idleWatchId = 0;
-        }
-        if (this._userActiveWatchId !== 0) {
-            this._idleMonitor.remove_watch(this._userActiveWatchId);
-            this._userActiveWatchId = 0;
+        if (this._idlePollSourceId !== 0) {
+            GLib.Source.remove(this._idlePollSourceId);
+            this._idlePollSourceId = 0;
         }
     }
 
@@ -259,24 +251,20 @@ export default class DDCUtilBrightnessControlExtension extends Extension {
     }
 
     scheduleIdleWatch() {
-        if (this._idleMonitor === null || this._idleDimmed ||
+        if (this._idleMonitor === null || this._idlePollSourceId !== 0 ||
             !this.settings.get_boolean('idle-dimming-enabled'))
             return;
 
         const delayMs = this.settings.get_int('idle-dimming-delay-seconds') * 1000;
-        brightnessLog(this.settings, `Scheduling idle dimming in ${delayMs} ms`);
-        this._idleWatchId = this._idleMonitor.add_idle_watch(delayMs, () => {
-            const watchId = this._idleWatchId;
-            this._idleWatchId = 0;
-            if (watchId !== 0)
-                this._idleMonitor.remove_watch(watchId);
-
-            this.dimDisplaysForIdle();
-            this._userActiveWatchId = this._idleMonitor.add_user_active_watch(() => {
-                this._userActiveWatchId = 0;
+        brightnessLog(this.settings, `Polling for ${delayMs} ms of idle time`);
+        this._idlePollSourceId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
+            const idleTime = this._idleMonitor.get_idletime();
+            if (!this._idleDimmed && idleTime >= delayMs)
+                this.dimDisplaysForIdle();
+            else if (this._idleDimmed && idleTime < delayMs)
                 this.restoreIdleBrightness();
-                this.scheduleIdleWatch();
-            });
+
+            return GLib.SOURCE_CONTINUE;
         });
     }
 
